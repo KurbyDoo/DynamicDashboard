@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { UploadService, UploadStatus } from '@/lib/uploadService';
 import { AuthService } from '@/lib/authService';
+import { supabase } from '@/lib/supabase';
 import CaptchaComponent from '@/components/ui/CaptchaComponent';
 
 export default function UploadPage() {
@@ -146,18 +147,49 @@ export default function UploadPage() {
             // Log file URL to console for debugging
             console.log('File uploaded successfully. URL:', result.data.publicUrl);
 
-            // Show success toast
-            toast.success('File uploaded successfully!');
+            // Create job entry in database
+            try {
+                const { data: userData } = await supabase.auth.getUser();
 
-            // Clear the selected file to reset the form
-            setSelectedFile(null);
-            setUploadStatus(UploadService.createInitialStatus());
+                if (!userData.user) {
+                    toast.error('Authentication error. Please refresh and try again.');
+                    setUploadStatus(UploadService.createErrorStatus('Authentication error'));
+                    return;
+                }
 
-            // Reset file inputs
-            const fileInputs = document.querySelectorAll('input[type="file"]') as NodeListOf<HTMLInputElement>;
-            fileInputs.forEach(input => {
-                input.value = '';
-            });
+                const { error: jobError } = await supabase
+                    .from('syllabus_jobs')
+                    .insert({
+                        user_id: userData.user.id,
+                        file_path: result.data.filePath,
+                        status: 'queued'
+                    });
+
+                if (jobError) {
+                    console.error('Job creation error:', jobError);
+                    toast.error('Your file was uploaded, but we couldn\'t add it to the queue. Please try again.');
+                    setUploadStatus(UploadService.createErrorStatus('Failed to create processing job'));
+                    return;
+                }
+
+                // Success - job created successfully
+                toast.success('Success! Your file has been added to the queue.');
+
+                // Clear the selected file to reset the form
+                setSelectedFile(null);
+                setUploadStatus(UploadService.createInitialStatus());
+
+                // Reset file inputs
+                const fileInputs = document.querySelectorAll('input[type="file"]') as NodeListOf<HTMLInputElement>;
+                fileInputs.forEach(input => {
+                    input.value = '';
+                });
+
+            } catch (error) {
+                console.error('Database operation failed:', error);
+                toast.error('Your file was uploaded, but we couldn\'t add it to the queue. Please try again.');
+                setUploadStatus(UploadService.createErrorStatus('Failed to create processing job'));
+            }
         } else {
             // Show error toast
             toast.error(result.error || 'Upload failed. Please try again.');
