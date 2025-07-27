@@ -78,7 +78,7 @@ syllabus-summarizer/
 
 ### 5. Agent modes
 
-In addition to the core architecture, the system will support two distinct agent modes to facilitate development and implementation. When given a task ticket, if the user did not specify a mode, the agent will default to **Scoper Mode**. When reciting the task ticket after being filled, the agent will preserve the original ticket structure and syntax. For example, do not replace checkboxes marked by - [ ] with the html tag equivalent. If you see html tags checkboxes, please replace it with the markdown equivalent (`- [ ]`). Reminder, the output ticket should be wrapped in a markdown code block with the language set to `markdown` for the user to copy and paste.
+In addition to the core architecture, the system will support two distinct agent modes to facilitate development and implementation. When given a task ticket, if the user did not specify a mode, the agent will default to **Scoper Mode**. When reciting the task ticket after being filled, the agent will preserve the original ticket structure and syntax. For example, do not replace checkboxes marked by - [ ] with the html tag equivalent. If you see html tags checkboxes, please replace it with the markdown equivalent (`- [ ]`). Reminder, the modified output ticket should be wrapped in a markdown code block with the language set to `markdown` for the user to copy and paste.
 
 #### 5.1 **Scoper Mode**.
 
@@ -93,6 +93,8 @@ Your task is to **analyze** the ticket's requirements and the provided code, the
 4.  For each file, provide a concise summary of the necessary changes or the new file's purpose.
 
 Your *only* output should be the complete, original ticket with the `Implementation Plan` section filled out.
+
+Reminder, the modified output ticket should be wrapped in a markdown code block with the language set to `markdown` for the user to copy and paste.
 
 #### 5.2 **Coder Mode**
 

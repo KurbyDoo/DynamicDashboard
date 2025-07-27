@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { UploadService, UploadStatus } from '@/lib/uploadService';
 import { AuthService } from '@/lib/authService';
 import CaptchaComponent from '@/components/ui/CaptchaComponent';
@@ -12,6 +13,31 @@ export default function UploadPage() {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [showCaptcha, setShowCaptcha] = useState(false);
     const [authError, setAuthError] = useState<string | null>(null);
+    const [authLoading, setAuthLoading] = useState(true);
+
+    // Check authentication status on component mount
+    useEffect(() => {
+        const checkAuth = async () => {
+            try {
+                const authResult = await AuthService.getCurrentUser();
+                if (authResult.success && authResult.user) {
+                    setIsAuthenticated(true);
+                    setShowCaptcha(false);
+                } else {
+                    setIsAuthenticated(false);
+                    setShowCaptcha(true);
+                }
+            } catch (error) {
+                console.error('Initial auth check failed:', error);
+                setIsAuthenticated(false);
+                setShowCaptcha(true);
+            } finally {
+                setAuthLoading(false);
+            }
+        };
+
+        checkAuth();
+    }, []);
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -75,19 +101,20 @@ export default function UploadPage() {
             if (authResult.success) {
                 setIsAuthenticated(true);
                 setShowCaptcha(false);
+                toast.success('Authentication successful! You can now upload your file.');
                 console.log('User authenticated successfully');
             } else {
                 setAuthError(authResult.error || 'Authentication failed');
                 setIsAuthenticated(false);
+                toast.error('Authentication failed. Please try again.');
             }
         } catch (error) {
             console.error('Captcha verification error:', error);
             setAuthError('Failed to verify captcha. Please try again.');
             setIsAuthenticated(false);
+            toast.error('Failed to verify captcha. Please try again.');
         }
-    };
-
-    const handleCaptchaError = (error: Error | unknown) => {
+    }; const handleCaptchaError = (error: Error | unknown) => {
         console.error('Captcha error:', error);
         setAuthError('Captcha verification failed. Please try again.');
         setIsAuthenticated(false);
@@ -101,7 +128,13 @@ export default function UploadPage() {
 
     const handleUpload = async () => {
         if (!selectedFile) {
-            setUploadStatus(UploadService.createErrorStatus('No file selected'));
+            toast.error('Please select a file to upload.');
+            return;
+        }
+
+        if (!isAuthenticated) {
+            toast.error('Please complete authentication first.');
+            setShowCaptcha(true);
             return;
         }
 
@@ -109,16 +142,25 @@ export default function UploadPage() {
 
         const result = await UploadService.uploadFileToSupabase(selectedFile);
 
-        if (result.needsAuth) {
-            // Show captcha if authentication is required
-            setShowCaptcha(true);
-            setUploadStatus(UploadService.createErrorStatus(result.error || 'Authentication required'));
-            return;
-        }
-
         if (result.success && result.data) {
-            setUploadStatus(UploadService.createSuccessStatus(result.data.publicUrl));
+            // Log file URL to console for debugging
+            console.log('File uploaded successfully. URL:', result.data.publicUrl);
+
+            // Show success toast
+            toast.success('File uploaded successfully!');
+
+            // Clear the selected file to reset the form
+            setSelectedFile(null);
+            setUploadStatus(UploadService.createInitialStatus());
+
+            // Reset file inputs
+            const fileInputs = document.querySelectorAll('input[type="file"]') as NodeListOf<HTMLInputElement>;
+            fileInputs.forEach(input => {
+                input.value = '';
+            });
         } else {
+            // Show error toast
+            toast.error(result.error || 'Upload failed. Please try again.');
             setUploadStatus(UploadService.createErrorStatus(result.error || 'Upload failed'));
         }
     };
@@ -172,31 +214,38 @@ export default function UploadPage() {
                                 {/* Upload Text */}
                                 <div className="mb-6">
                                     <p className="text-xl font-medium text-gray-900 mb-2">
-                                        {isDragOver ? 'Drop your file here' : 'Drag and drop your syllabus'}
+                                        {isDragOver
+                                            ? 'Drop your file here'
+                                            : isAuthenticated
+                                                ? 'Drag and drop your syllabus'
+                                                : 'Please complete authentication first'
+                                        }
                                     </p>
-                                    <p className="text-gray-600">or</p>
+                                    {isAuthenticated && <p className="text-gray-600">or</p>}
                                 </div>
 
                                 {/* File Input Button */}
-                                <label
-                                    htmlFor="file-upload"
-                                    className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer transition-colors"
-                                >
-                                    <svg
-                                        className="w-5 h-5 mr-2"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
+                                {isAuthenticated && !authLoading && (
+                                    <label
+                                        htmlFor="file-upload"
+                                        className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer transition-colors"
                                     >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                                        />
-                                    </svg>
-                                    Choose File
-                                </label>
+                                        <svg
+                                            className="w-5 h-5 mr-2"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                                            />
+                                        </svg>
+                                        Choose File
+                                    </label>
+                                )}
 
                                 <input
                                     id="file-upload"
@@ -205,6 +254,7 @@ export default function UploadPage() {
                                     className="sr-only"
                                     accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                     onChange={handleFileChange}
+                                    disabled={!isAuthenticated}
                                 />
 
                                 {/* Supported Formats */}
@@ -295,134 +345,65 @@ export default function UploadPage() {
                                     onChange={handleFileChange}
                                 />
 
-                                {/* Process Button */}
-                                <button
-                                    onClick={handleUpload}
-                                    disabled={uploadStatus.isUploading || uploadStatus.success}
-                                    className={`inline-flex items-center px-6 py-2 border border-transparent text-sm font-medium rounded-md transition-colors ${uploadStatus.success
-                                        ? 'text-white bg-green-600 cursor-default'
-                                        : uploadStatus.isUploading
+                                {/* Process Button - Only show if authenticated */}
+                                {isAuthenticated && !authLoading && (
+                                    <button
+                                        onClick={handleUpload}
+                                        disabled={uploadStatus.isUploading}
+                                        className={`inline-flex items-center px-6 py-2 border border-transparent text-sm font-medium rounded-md transition-colors ${uploadStatus.isUploading
                                             ? 'text-white bg-blue-400 cursor-not-allowed'
                                             : 'text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500'
-                                        }`}
-                                >
-                                    {uploadStatus.isUploading ? (
-                                        <>
-                                            <svg
-                                                className="w-4 h-4 mr-2 animate-spin"
-                                                fill="none"
-                                                viewBox="0 0 24 24"
-                                            >
-                                                <circle
-                                                    className="opacity-25"
-                                                    cx="12"
-                                                    cy="12"
-                                                    r="10"
+                                            }`}
+                                    >
+                                        {uploadStatus.isUploading ? (
+                                            <>
+                                                <svg
+                                                    className="w-4 h-4 mr-2 animate-spin"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                >
+                                                    <circle
+                                                        className="opacity-25"
+                                                        cx="12"
+                                                        cy="12"
+                                                        r="10"
+                                                        stroke="currentColor"
+                                                        strokeWidth="4"
+                                                    />
+                                                    <path
+                                                        className="opacity-75"
+                                                        fill="currentColor"
+                                                        d="m15.84 3.13a11.1 11.1 0 00-7.68 0c-.85.25-1.72.55-2.54.9-.82.35-1.6.75-2.33 1.2a11.1 11.1 0 00-3.97 4.54c-.32.76-.58 1.54-.78 2.34-.2.8-.34 1.61-.42 2.43a11.1 11.1 0 001.26 7.04c.49.78 1.05 1.51 1.68 2.18a11.1 11.1 0 007.04 1.26c.82-.08 1.63-.22 2.43-.42.8-.2 1.58-.46 2.34-.78a11.1 11.1 0 004.54-3.97c.45-.73.85-1.51 1.2-2.33.35-.82.65-1.69.9-2.54a11.1 11.1 0 000-7.68c-.25-.85-.55-1.72-.9-2.54-.35-.82-.75-1.6-1.2-2.33a11.1 11.1 0 00-4.54-3.97c-.76-.32-1.54-.58-2.34-.78a11.1 11.1 0 00-2.43-.42z"
+                                                    />
+                                                </svg>
+                                                Uploading...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg
+                                                    className="w-4 h-4 mr-2"
+                                                    fill="none"
                                                     stroke="currentColor"
-                                                    strokeWidth="4"
-                                                />
-                                                <path
-                                                    className="opacity-75"
-                                                    fill="currentColor"
-                                                    d="m15.84 3.13a11.1 11.1 0 00-7.68 0c-.85.25-1.72.55-2.54.9-.82.35-1.6.75-2.33 1.2a11.1 11.1 0 00-3.97 4.54c-.32.76-.58 1.54-.78 2.34-.2.8-.34 1.61-.42 2.43a11.1 11.1 0 001.26 7.04c.49.78 1.05 1.51 1.68 2.18a11.1 11.1 0 007.04 1.26c.82-.08 1.63-.22 2.43-.42.8-.2 1.58-.46 2.34-.78a11.1 11.1 0 004.54-3.97c.45-.73.85-1.51 1.2-2.33.35-.82.65-1.69.9-2.54a11.1 11.1 0 000-7.68c-.25-.85-.55-1.72-.9-2.54-.35-.82-.75-1.6-1.2-2.33a11.1 11.1 0 00-4.54-3.97c-.76-.32-1.54-.58-2.34-.78a11.1 11.1 0 00-2.43-.42z"
-                                                />
-                                            </svg>
-                                            Uploading...
-                                        </>
-                                    ) : uploadStatus.success ? (
-                                        <>
-                                            <svg
-                                                className="w-4 h-4 mr-2"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                viewBox="0 0 24 24"
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    strokeWidth={2}
-                                                    d="M5 13l4 4L19 7"
-                                                />
-                                            </svg>
-                                            Upload Complete
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg
-                                                className="w-4 h-4 mr-2"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                viewBox="0 0 24 24"
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    strokeWidth={2}
-                                                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 12l3 3m0 0l3-3m-3 3V9"
-                                                />
-                                            </svg>
-                                            Upload to Storage
-                                        </>
-                                    )}
-                                </button>
+                                                    viewBox="0 0 24 24"
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        strokeWidth={2}
+                                                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 12l3 3m0 0l3-3m-3 3V9"
+                                                    />
+                                                </svg>
+                                                Upload to Storage
+                                            </>
+                                        )}
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>
 
-                    {/* Upload Status Messages */}
-                    {uploadStatus.error && (
-                        <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
-                            <div className="flex items-center">
-                                <svg
-                                    className="w-5 h-5 text-red-500 mr-2"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                                    />
-                                </svg>
-                                <p className="text-sm font-medium text-red-800">
-                                    Upload Failed: {uploadStatus.error}
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {uploadStatus.success && uploadStatus.fileUrl && (
-                        <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
-                            <div className="flex items-center">
-                                <svg
-                                    className="w-5 h-5 text-green-500 mr-2"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                                    />
-                                </svg>
-                                <div>
-                                    <p className="text-sm font-medium text-green-800">
-                                        File uploaded successfully!
-                                    </p>
-                                    <p className="text-xs text-green-600 mt-1">
-                                        File URL: {uploadStatus.fileUrl}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Captcha Modal */}
-                    {showCaptcha && (
+                    {/* Captcha Section - Show if not authenticated or auth loading */}
+                    {(showCaptcha || (!isAuthenticated && !authLoading)) && (
                         <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-6">
                             <div className="text-center">
                                 <h3 className="text-lg font-medium text-yellow-900 mb-4">
@@ -444,20 +425,34 @@ export default function UploadPage() {
                                         {authError}
                                     </div>
                                 )}
+                            </div>
+                        </div>
+                    )}
 
-                                {isAuthenticated && (
-                                    <div className="mt-4">
-                                        <div className="text-sm text-green-600 mb-3">
-                                            ✓ Authentication successful! You can now upload your file.
-                                        </div>
-                                        <button
-                                            onClick={() => setShowCaptcha(false)}
-                                            className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 transition-colors"
-                                        >
-                                            Continue to Upload
-                                        </button>
-                                    </div>
-                                )}
+                    {/* Loading indicator during auth check */}
+                    {authLoading && (
+                        <div className="mt-4 text-center">
+                            <div className="inline-flex items-center px-4 py-2">
+                                <svg
+                                    className="w-4 h-4 mr-2 animate-spin"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <circle
+                                        className="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        strokeWidth="4"
+                                    />
+                                    <path
+                                        className="opacity-75"
+                                        fill="currentColor"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                    />
+                                </svg>
+                                <span className="text-sm text-gray-600">Checking authentication...</span>
                             </div>
                         </div>
                     )}
