@@ -34,16 +34,19 @@ export default function QueuePage() {
 
                 setIsAuthenticated(true);
 
-                // Fetch jobs for the current user
+                // Fetch jobs for the current user - explicitly filter by user_id
                 const { data, error } = await supabase
                     .from('syllabus_jobs')
                     .select('*')
+                    .eq('user_id', authResult.user.id)
                     .order('created_at', { ascending: false });
 
                 if (error) {
                     console.error('Error fetching jobs:', error);
                     toast.error('Failed to load jobs. Please try again.');
                 } else {
+                    console.log('Fetched jobs:', data);
+                    console.log('Current user ID:', authResult.user.id);
                     setJobs(data || []);
                 }
             } catch (error) {
