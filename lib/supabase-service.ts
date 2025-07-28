@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Service role client for server-side operations that bypass RLS
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+// Support both manual env vars and Vercel-Supabase integration
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 if (!supabaseServiceKey) {

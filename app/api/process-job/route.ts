@@ -230,34 +230,47 @@ async function processJobInBackground(job: SyllabusJob) {
         // 1. Fetch the file from Supabase Storage with extensive debugging and timeout
         console.log(`📁 [Background] Fetching file from storage: ${job.file_path}`);
         console.log(`🌐 [Background] Environment check - Service key exists: ${!!process.env.SUPABASE_SERVICE_ROLE_KEY}`);
-        console.log(`🌐 [Background] Supabase URL: ${process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Set' : 'Missing'}`);
+        console.log(`🌐 [Background] Supabase URL: ${(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) ? 'Set' : 'Missing'}`);
+        console.log(`🌐 [Background] Using URL source: ${process.env.SUPABASE_URL ? 'SUPABASE_URL (Vercel integration)' : 'NEXT_PUBLIC_SUPABASE_URL (manual)'}`);
         console.log(`🗂️ [Background] Storage bucket: syllabi`);
         
         // Add multiple timeout layers for debugging
         const downloadStart = Date.now();
         
-        // First, try to list the bucket to verify connectivity with timeout
+        // First, try to list the bucket to verify connectivity with aggressive timeout
         console.log(`🔍 [Background] Testing bucket connectivity...`);
         
-        const listPromise = supabaseService.storage
-            .from('syllabi')
-            .list('', { limit: 1 });
+        // Create a more aggressive timeout that actually works
+        let timeoutHandle: NodeJS.Timeout;
+        const listPromise = new Promise<{ data: unknown[] | null; error: unknown | null }>((resolve, reject) => {
+            // Set timeout first
+            timeoutHandle = setTimeout(() => {
+                console.error(`⏰ [Background] FORCE TIMEOUT: Bucket list timeout after 5s`);
+                reject(new Error('Bucket list operation timeout after 5 seconds - FORCED'));
+            }, 5000);
             
-        const listTimeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => {
-                console.error(`⏰ [Background] Bucket list timeout after 10s`);
-                reject(new Error('Bucket list operation timeout after 10 seconds'));
-            }, 10000); // 10 second timeout for list operation
+            // Then start the actual operation
+            supabaseService.storage
+                .from('syllabi')
+                .list('', { limit: 1 })
+                .then((result) => {
+                    clearTimeout(timeoutHandle);
+                    console.log(`📋 [Background] Bucket list completed successfully`);
+                    resolve(result);
+                })
+                .catch((error) => {
+                    clearTimeout(timeoutHandle);
+                    console.error(`❌ [Background] Bucket list failed:`, error);
+                    reject(error);
+                });
         });
         
-        const { data: bucketFiles, error: listError } = await Promise.race([
-            listPromise,
-            listTimeoutPromise
-        ]);
+        const { data: bucketFiles, error: listError } = await listPromise;
             
         if (listError) {
             console.error(`❌ [Background] Bucket connectivity test failed:`, listError);
-            throw new Error(`Storage bucket inaccessible: ${listError.message}`);
+            const errorMsg = listError instanceof Error ? listError.message : 'Unknown storage error';
+            throw new Error(`Storage bucket inaccessible: ${errorMsg}`);
         }
         
         console.log(`✅ [Background] Bucket connectivity confirmed, found ${bucketFiles?.length || 0} files`);
