@@ -162,18 +162,18 @@ export default function UploadPage() {
                     .insert({
                         user_id: userData.user.id,
                         file_path: result.data.filePath,
-                        status: 'queued'
+                        status: 'unstarted'
                     });
 
                 if (jobError) {
                     console.error('Job creation error:', jobError);
-                    toast.error('Your file was uploaded, but we couldn\'t add it to the queue. Please try again.');
+                    toast.error('Your file was uploaded, but we couldn\'t add it to the jobs list. Please try again.');
                     setUploadStatus(UploadService.createErrorStatus('Failed to create processing job'));
                     return;
                 }
 
                 // Success - job created successfully
-                toast.success('Success! Your file has been added to the queue.');
+                toast.success('Success! Your file has been added to the jobs list.');
 
                 // Clear the selected file to reset the form
                 setSelectedFile(null);
@@ -187,7 +187,7 @@ export default function UploadPage() {
 
             } catch (error) {
                 console.error('Database operation failed:', error);
-                toast.error('Your file was uploaded, but we couldn\'t add it to the queue. Please try again.');
+                toast.error('Your file was uploaded, but we couldn\'t add it to the jobs list. Please try again.');
                 setUploadStatus(UploadService.createErrorStatus('Failed to create processing job'));
             }
         } else {

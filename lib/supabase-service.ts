@@ -20,7 +20,7 @@ export interface SyllabusJob {
     id: string;
     user_id: string;
     file_path: string;
-    status: 'queued' | 'processing' | 'completed' | 'failed';
+    status: 'unstarted' | 'processing' | 'completed' | 'failed';
     job_output: Record<string, unknown> | null;
     error_message: string | null;
     created_at: string;
