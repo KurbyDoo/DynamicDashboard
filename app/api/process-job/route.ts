@@ -261,9 +261,9 @@ async function processJobInBackground(job: SyllabusJob) {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
+                    prefix: '',
                     limit: 1,
-                    offset: 0,
-                    sortBy: { column: 'name', order: 'asc' }
+                    offset: 0
                 }),
                 signal: listController.signal
             });
@@ -293,6 +293,7 @@ async function processJobInBackground(job: SyllabusJob) {
         console.log(`🔧 [Background] Using direct HTTP fetch workaround for file download`);
         
         // Construct the authenticated storage URL
+        // Note: job.file_path format is "{user_id}/{file_uuid}-{filename}", so we need to add the bucket name
         const storageUrl = `${process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/authenticated/syllabi/${job.file_path}`;
         console.log(`🌐 [Background] Fetching from URL: ${storageUrl}`);
         
