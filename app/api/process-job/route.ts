@@ -237,43 +237,56 @@ async function processJobInBackground(job: SyllabusJob) {
         // Add multiple timeout layers for debugging
         const downloadStart = Date.now();
         
-        // First, try to list the bucket to verify connectivity with aggressive timeout
+        // First, try to list the bucket to verify connectivity with direct HTTP call
         console.log(`🔍 [Background] Testing bucket connectivity...`);
         
-        // Create a more aggressive timeout that actually works
-        let timeoutHandle: NodeJS.Timeout;
-        const listPromise = new Promise<{ data: unknown[] | null; error: unknown | null }>((resolve, reject) => {
-            // Set timeout first
-            timeoutHandle = setTimeout(() => {
-                console.error(`⏰ [Background] FORCE TIMEOUT: Bucket list timeout after 5s`);
-                reject(new Error('Bucket list operation timeout after 5 seconds - FORCED'));
-            }, 5000);
-            
-            // Then start the actual operation
-            supabaseService.storage
-                .from('syllabi')
-                .list('', { limit: 1 })
-                .then((result) => {
-                    clearTimeout(timeoutHandle);
-                    console.log(`📋 [Background] Bucket list completed successfully`);
-                    resolve(result);
-                })
-                .catch((error) => {
-                    clearTimeout(timeoutHandle);
-                    console.error(`❌ [Background] Bucket list failed:`, error);
-                    reject(error);
-                });
-        });
+        // Use direct HTTP fetch for bucket listing (avoiding Supabase SDK hanging issue)
+        const listUrl = `${process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/list/syllabi`;
+        console.log(`🌐 [Background] Testing connectivity to: ${listUrl}`);
         
-        const { data: bucketFiles, error: listError } = await listPromise;
+        const listController = new AbortController();
+        const listTimeoutId = setTimeout(() => {
+            console.error(`⏰ [Background] Aborting bucket list after 5s timeout`);
+            listController.abort();
+        }, 5000);
+        
+        let bucketFiles;
+        try {
+            console.log(`🚀 [Background] Starting bucket list HTTP fetch with 5s timeout...`);
+            const listResponse = await fetch(listUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                    'apikey': `${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    limit: 1,
+                    offset: 0,
+                    sortBy: { column: 'name', order: 'asc' }
+                }),
+                signal: listController.signal
+            });
             
-        if (listError) {
+            clearTimeout(listTimeoutId);
+            console.log(`� [Background] Bucket list response received: ${listResponse.status} ${listResponse.statusText}`);
+            
+            if (!listResponse.ok) {
+                throw new Error(`Bucket list API returned ${listResponse.status}: ${listResponse.statusText}`);
+            }
+            
+            bucketFiles = await listResponse.json();
+            console.log(`✅ [Background] Bucket connectivity confirmed, found ${bucketFiles?.length || 0} files`);
+            
+        } catch (listError) {
+            clearTimeout(listTimeoutId);
+            if (listError instanceof Error && listError.name === 'AbortError') {
+                throw new Error('Bucket list timed out after 5 seconds');
+            }
             console.error(`❌ [Background] Bucket connectivity test failed:`, listError);
             const errorMsg = listError instanceof Error ? listError.message : 'Unknown storage error';
             throw new Error(`Storage bucket inaccessible: ${errorMsg}`);
         }
-        
-        console.log(`✅ [Background] Bucket connectivity confirmed, found ${bucketFiles?.length || 0} files`);
         
         // WORKAROUND: Use direct HTTP fetch instead of Supabase SDK download
         // This resolves known hanging issues on Vercel/serverless environments
