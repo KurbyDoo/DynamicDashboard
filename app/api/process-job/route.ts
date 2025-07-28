@@ -230,17 +230,30 @@ async function processJobInBackground(job: SyllabusJob) {
         // 1. Fetch the file from Supabase Storage with extensive debugging and timeout
         console.log(`📁 [Background] Fetching file from storage: ${job.file_path}`);
         console.log(`🌐 [Background] Environment check - Service key exists: ${!!process.env.SUPABASE_SERVICE_ROLE_KEY}`);
-        console.log(`🌐 [Background] Supabase URL: ${process.env.SUPABASE_URL ? 'Set' : 'Missing'}`);
+        console.log(`🌐 [Background] Supabase URL: ${process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Set' : 'Missing'}`);
         console.log(`🗂️ [Background] Storage bucket: syllabi`);
         
         // Add multiple timeout layers for debugging
         const downloadStart = Date.now();
         
-        // First, try to list the bucket to verify connectivity
+        // First, try to list the bucket to verify connectivity with timeout
         console.log(`🔍 [Background] Testing bucket connectivity...`);
-        const { data: bucketFiles, error: listError } = await supabaseService.storage
+        
+        const listPromise = supabaseService.storage
             .from('syllabi')
             .list('', { limit: 1 });
+            
+        const listTimeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => {
+                console.error(`⏰ [Background] Bucket list timeout after 10s`);
+                reject(new Error('Bucket list operation timeout after 10 seconds'));
+            }, 10000); // 10 second timeout for list operation
+        });
+        
+        const { data: bucketFiles, error: listError } = await Promise.race([
+            listPromise,
+            listTimeoutPromise
+        ]);
             
         if (listError) {
             console.error(`❌ [Background] Bucket connectivity test failed:`, listError);
