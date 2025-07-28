@@ -262,36 +262,44 @@ async function processJobInBackground(job: SyllabusJob) {
         
         console.log(`✅ [Background] Bucket connectivity confirmed, found ${bucketFiles?.length || 0} files`);
         
-        // Now try the actual download with aggressive timeout
+        // Now try the actual download with shorter timeout for faster failure
         const downloadPromise = supabaseService.storage
             .from('syllabi')
             .download(job.file_path);
-            
+        
+        let timeoutId: NodeJS.Timeout | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
-            const timeoutId = setTimeout(() => {
+            timeoutId = setTimeout(() => {
                 const elapsed = Date.now() - downloadStart;
-                console.error(`⏰ [Background] Storage download timeout after ${elapsed}ms (30s limit)`);
-                reject(new Error(`Storage download timeout after ${elapsed}ms`));
-            }, 30000); // Reduced to 30 seconds for faster feedback
-            
-            // Log periodic progress
-            const progressInterval = setInterval(() => {
-                const elapsed = Date.now() - downloadStart;
-                console.log(`⏳ [Background] Download still in progress... ${elapsed}ms elapsed`);
-            }, 5000);
-            
-            // Clear intervals when timeout triggers
-            setTimeout(() => {
-                clearInterval(progressInterval);
-                clearTimeout(timeoutId);
-            }, 30000);
+                console.error(`⏰ [Background] Storage download timeout after ${elapsed}ms (15s limit) - FORCE FAILING`);
+                reject(new Error(`Storage download timeout after ${elapsed}ms - Supabase Storage may be unresponsive`));
+            }, 15000); // Reduced to 15 seconds for faster feedback
         });
         
-        console.log(`⬇️ [Background] Starting download race with 30s timeout...`);
-        const result = await Promise.race([
-            downloadPromise,
-            timeoutPromise
-        ]);
+        // Log progress every 2 seconds for more frequent updates
+        const progressInterval = setInterval(() => {
+            const elapsed = Date.now() - downloadStart;
+            console.log(`⏳ [Background] Download still in progress... ${elapsed}ms elapsed`);
+        }, 2000);
+        
+        console.log(`⬇️ [Background] Starting download race with 15s timeout (reduced for faster failure)...`);
+        
+        let result;
+        try {
+            result = await Promise.race([
+                downloadPromise,
+                timeoutPromise
+            ]);
+        } catch (error) {
+            console.error(`❌ [Background] Download failed or timed out:`, error);
+            throw error;
+        } finally {
+            // Always clean up the intervals and timeouts
+            clearInterval(progressInterval);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
         
         const downloadTime = Date.now() - downloadStart;
         console.log(`⏱️ [Background] Download completed in ${downloadTime}ms`);
