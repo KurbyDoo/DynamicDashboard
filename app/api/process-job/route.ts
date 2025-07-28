@@ -275,59 +275,51 @@ async function processJobInBackground(job: SyllabusJob) {
         
         console.log(`✅ [Background] Bucket connectivity confirmed, found ${bucketFiles?.length || 0} files`);
         
-        // Now try the actual download with shorter timeout for faster failure
-        const downloadPromise = supabaseService.storage
-            .from('syllabi')
-            .download(job.file_path);
+        // WORKAROUND: Use direct HTTP fetch instead of Supabase SDK download
+        // This resolves known hanging issues on Vercel/serverless environments
+        console.log(`🔧 [Background] Using direct HTTP fetch workaround for file download`);
         
-        let timeoutId: NodeJS.Timeout | undefined;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-                const elapsed = Date.now() - downloadStart;
-                console.error(`⏰ [Background] Storage download timeout after ${elapsed}ms (15s limit) - FORCE FAILING`);
-                reject(new Error(`Storage download timeout after ${elapsed}ms - Supabase Storage may be unresponsive`));
-            }, 15000); // Reduced to 15 seconds for faster feedback
-        });
+        // Construct the authenticated storage URL
+        const storageUrl = `${process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/authenticated/syllabi/${job.file_path}`;
+        console.log(`🌐 [Background] Fetching from URL: ${storageUrl}`);
         
-        // Log progress every 2 seconds for more frequent updates
-        const progressInterval = setInterval(() => {
-            const elapsed = Date.now() - downloadStart;
-            console.log(`⏳ [Background] Download still in progress... ${elapsed}ms elapsed`);
-        }, 2000);
+        // Create AbortController for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.error(`⏰ [Background] Aborting fetch after 15s timeout`);
+            controller.abort();
+        }, 15000);
         
-        console.log(`⬇️ [Background] Starting download race with 15s timeout (reduced for faster failure)...`);
-        
-        let result;
+        let response;
         try {
-            result = await Promise.race([
-                downloadPromise,
-                timeoutPromise
-            ]);
-        } catch (error) {
-            console.error(`❌ [Background] Download failed or timed out:`, error);
-            throw error;
-        } finally {
-            // Always clean up the intervals and timeouts
-            clearInterval(progressInterval);
-            if (timeoutId) {
-                clearTimeout(timeoutId);
+            console.log(`🚀 [Background] Starting direct HTTP fetch with 15s timeout...`);
+            response = await fetch(storageUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                    'apikey': `${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+                },
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            console.log(`📡 [Background] HTTP response received: ${response.status} ${response.statusText}`);
+            
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+                throw new Error('File download timed out after 15 seconds');
             }
+            throw new Error(`HTTP fetch failed: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
         }
         
+        if (!response.ok) {
+            throw new Error(`Storage API returned ${response.status}: ${response.statusText}`);
+        }
+        
+        // Convert response to blob (similar to Supabase SDK behavior)
+        const fileData = await response.blob();
         const downloadTime = Date.now() - downloadStart;
-        console.log(`⏱️ [Background] Download completed in ${downloadTime}ms`);
-        
-        const { data: fileData, error: storageError } = result;
-        
-        if (storageError) {
-            console.error('❌ [Background] Storage error:', storageError);
-            throw new Error(`Storage fetch failed: ${storageError.message}`);
-        }
-        
-        if (!fileData) {
-            console.error('❌ [Background] No file data returned from storage');
-            throw new Error('File not found in storage');
-        }
         
         const fileSize = fileData.size;
         const fileName = job.file_path.split('/').pop() || 'unknown';
