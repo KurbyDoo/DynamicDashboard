@@ -198,7 +198,7 @@ export async function POST(request: NextRequest) {
         console.log(`✅ Job ${lockedJob.id} started processing in ${processingTime}ms`);
         
         // Start background processing (don't await this)
-        processJobInBackground(job).catch(error => {
+        processJobInBackground(job).catch((error: unknown) => {
             console.error(`❌ Background processing failed for job ${job.id}:`, error);
         });
         
@@ -227,47 +227,85 @@ export async function POST(request: NextRequest) {
 // Background processing function (runs asynchronously)
 async function processJobInBackground(job: SyllabusJob) {
     try {
-        // 1. Fetch the file from Supabase Storage with timeout
-        console.log(`📁 Fetching file from storage: ${job.file_path}`);
-        console.log(`🌐 Environment check - Service key exists: ${!!process.env.SUPABASE_SERVICE_ROLE_KEY}`);
+        // 1. Fetch the file from Supabase Storage with extensive debugging and timeout
+        console.log(`📁 [Background] Fetching file from storage: ${job.file_path}`);
+        console.log(`🌐 [Background] Environment check - Service key exists: ${!!process.env.SUPABASE_SERVICE_ROLE_KEY}`);
+        console.log(`🌐 [Background] Supabase URL: ${process.env.SUPABASE_URL ? 'Set' : 'Missing'}`);
+        console.log(`🗂️ [Background] Storage bucket: syllabi`);
         
-        // Add timeout to prevent hanging
+        // Add multiple timeout layers for debugging
+        const downloadStart = Date.now();
+        
+        // First, try to list the bucket to verify connectivity
+        console.log(`🔍 [Background] Testing bucket connectivity...`);
+        const { data: bucketFiles, error: listError } = await supabaseService.storage
+            .from('syllabi')
+            .list('', { limit: 1 });
+            
+        if (listError) {
+            console.error(`❌ [Background] Bucket connectivity test failed:`, listError);
+            throw new Error(`Storage bucket inaccessible: ${listError.message}`);
+        }
+        
+        console.log(`✅ [Background] Bucket connectivity confirmed, found ${bucketFiles?.length || 0} files`);
+        
+        // Now try the actual download with aggressive timeout
         const downloadPromise = supabaseService.storage
             .from('syllabi')
             .download(job.file_path);
             
-        const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Storage download timeout after 60 seconds')), 60000)
-        );
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            const timeoutId = setTimeout(() => {
+                const elapsed = Date.now() - downloadStart;
+                console.error(`⏰ [Background] Storage download timeout after ${elapsed}ms (30s limit)`);
+                reject(new Error(`Storage download timeout after ${elapsed}ms`));
+            }, 30000); // Reduced to 30 seconds for faster feedback
+            
+            // Log periodic progress
+            const progressInterval = setInterval(() => {
+                const elapsed = Date.now() - downloadStart;
+                console.log(`⏳ [Background] Download still in progress... ${elapsed}ms elapsed`);
+            }, 5000);
+            
+            // Clear intervals when timeout triggers
+            setTimeout(() => {
+                clearInterval(progressInterval);
+                clearTimeout(timeoutId);
+            }, 30000);
+        });
         
+        console.log(`⬇️ [Background] Starting download race with 30s timeout...`);
         const result = await Promise.race([
             downloadPromise,
             timeoutPromise
         ]);
         
+        const downloadTime = Date.now() - downloadStart;
+        console.log(`⏱️ [Background] Download completed in ${downloadTime}ms`);
+        
         const { data: fileData, error: storageError } = result;
         
         if (storageError) {
-            console.error('❌ Storage error:', storageError);
+            console.error('❌ [Background] Storage error:', storageError);
             throw new Error(`Storage fetch failed: ${storageError.message}`);
         }
         
         if (!fileData) {
-            console.error('❌ No file data returned from storage');
+            console.error('❌ [Background] No file data returned from storage');
             throw new Error('File not found in storage');
         }
         
         const fileSize = fileData.size;
         const fileName = job.file_path.split('/').pop() || 'unknown';
-        console.log(`📄 File fetched successfully: ${fileName} (${fileSize} bytes)`);
+        console.log(`📄 [Background] File fetched successfully: ${fileName} (${fileSize} bytes) in ${downloadTime}ms`);
         
         // 2. Mock LLM processing with delay
-        console.log('🤖 Starting mock LLM processing (dual strategy simulation)...');
-        await simulateProcessing(30); // 4 second delay
+        console.log('🤖 [Background] Starting mock LLM processing (dual strategy simulation)...');
+        await simulateProcessing(4); // 4 second delay
         
         // 3. Generate mock results
         const mockResults = generateMockLLMResults(fileName);
-        console.log('🎯 Mock LLM processing completed successfully');
+        console.log('🎯 [Background] Mock LLM processing completed successfully');
         
         // 4. Update job status to 'completed' with results
         const { error: completionError } = await supabaseService
@@ -284,11 +322,11 @@ async function processJobInBackground(job: SyllabusJob) {
             throw new Error(`Failed to update job completion: ${completionError.message}`);
         }
         
-        console.log(`✅ Job ${job.id} completed successfully in background`);
+        console.log(`✅ [Background] Job ${job.id} completed successfully in background`);
         
     } catch (processingError) {
         // Handle processing errors - update job status to 'failed'
-        console.error(`❌ Background processing failed for job ${job.id}:`, processingError);
+        console.error(`❌ [Background] Processing failed for job ${job.id}:`, processingError);
         
         const errorMessage = processingError instanceof Error 
             ? processingError.message 
