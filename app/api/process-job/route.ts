@@ -227,18 +227,31 @@ export async function POST(request: NextRequest) {
 // Background processing function (runs asynchronously)
 async function processJobInBackground(job: SyllabusJob) {
     try {
-        // 1. Fetch the file from Supabase Storage
+        // 1. Fetch the file from Supabase Storage with timeout
         console.log(`📁 Fetching file from storage: ${job.file_path}`);
+        console.log(`🌐 Environment check - Service key exists: ${!!process.env.SUPABASE_SERVICE_ROLE_KEY}`);
         
-        const { data: fileData, error: storageError } = await supabaseService.storage
+        // Add timeout to prevent hanging
+        const downloadPromise = supabaseService.storage
             .from('syllabi')
             .download(job.file_path);
+            
+        const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Storage download timeout after 60 seconds')), 60000)
+        );
+        
+        const { data: fileData, error: storageError } = await Promise.race([
+            downloadPromise,
+            timeoutPromise
+        ]);
         
         if (storageError) {
+            console.error('❌ Storage error:', storageError);
             throw new Error(`Storage fetch failed: ${storageError.message}`);
         }
         
         if (!fileData) {
+            console.error('❌ No file data returned from storage');
             throw new Error('File not found in storage');
         }
         
