@@ -240,10 +240,12 @@ async function processJobInBackground(job: SyllabusJob) {
             setTimeout(() => reject(new Error('Storage download timeout after 60 seconds')), 60000)
         );
         
-        const { data: fileData, error: storageError } = await Promise.race([
+        const result = await Promise.race([
             downloadPromise,
             timeoutPromise
         ]);
+        
+        const { data: fileData, error: storageError } = result;
         
         if (storageError) {
             console.error('❌ Storage error:', storageError);
