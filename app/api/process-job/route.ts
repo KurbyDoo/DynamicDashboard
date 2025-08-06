@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseService, type SyllabusJob, type MockLLMResults } from '@/lib/supabase-service';
 import { createClient } from '@supabase/supabase-js';
+import { after } from 'next/server';
+
+// Configure for Fluid Compute (remove conflicting traditional serverless settings)
+export const maxDuration = 300; // 5 minutes - this is still needed for timeout
+// Remove runtime and memory exports - let Fluid Compute handle these
 
 // Utility function to simulate processing delay
 const simulateProcessing = (seconds: number = 4): Promise<void> => {
@@ -103,6 +108,16 @@ export async function POST(request: NextRequest) {
     const startTime = Date.now();
     
     try {
+        // Debug: Log runtime environment info to identify if we're in Fluid Compute
+        console.log(`🔧 Runtime Environment Debug:`);
+        console.log(`- Process PID: ${process.pid}`);
+        console.log(`- Node Version: ${process.version}`);
+        console.log(`- Platform: ${process.platform}`);
+        console.log(`- Architecture: ${process.arch}`);
+        console.log(`- Memory Usage:`, process.memoryUsage());
+        console.log(`- Environment: ${process.env.VERCEL_ENV || 'local'}`);
+        console.log(`- Vercel Region: ${process.env.VERCEL_REGION || 'unknown'}`);
+        
         // 1. Authenticate the user making the request
         const userSupabase = createClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -197,9 +212,9 @@ export async function POST(request: NextRequest) {
         const processingTime = Date.now() - startTime;
         console.log(`✅ Job ${lockedJob.id} started processing in ${processingTime}ms`);
         
-        // Start background processing (don't await this)
-        processJobInBackground(job).catch((error: unknown) => {
-            console.error(`❌ Background processing failed for job ${job.id}:`, error);
+        // Schedule background processing using Next.js 'after' for proper Fluid Compute support
+        after(async () => {
+            await processJobInBackground(job);
         });
         
         return NextResponse.json({
@@ -227,15 +242,19 @@ export async function POST(request: NextRequest) {
 // Background processing function (runs asynchronously)
 async function processJobInBackground(job: SyllabusJob) {
     try {
+        // Debug: Additional runtime info in background context
+        console.log(`🔧 [Background] PID: ${process.pid}, Memory:`, process.memoryUsage().heapUsed / 1024 / 1024, 'MB');
+        console.log(`🔧 [Background] Fluid Compute Detection: Process reused = ${process.env.VERCEL_REGION ? 'likely' : 'unknown'}`);
+        
         // 1. Fetch the file from Supabase Storage with extensive debugging and timeout
         console.log(`📁 [Background] Fetching file from storage: ${job.file_path}`);
         console.log(`🌐 [Background] Environment check - Service key exists: ${!!process.env.SUPABASE_SERVICE_ROLE_KEY}`);
         console.log(`🌐 [Background] Supabase URL: ${(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) ? 'Set' : 'Missing'}`);
         console.log(`🌐 [Background] Using URL source: ${process.env.SUPABASE_URL ? 'SUPABASE_URL (Vercel integration)' : 'NEXT_PUBLIC_SUPABASE_URL (manual)'}`);
         console.log(`🗂️ [Background] Storage bucket: syllabi`);
-        
-        // Add multiple timeout layers for debugging
-        const downloadStart = Date.now();
+    
+    // Add multiple timeout layers for debugging
+    const downloadStart = Date.now();
         
         // First, try to list the bucket to verify connectivity with direct HTTP call
         console.log(`🔍 [Background] Testing bucket connectivity...`);
